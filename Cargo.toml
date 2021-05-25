@@ -1,0 +1,13 @@
+[package]
+name = "eddy"
+version = "0.0.1"
+authors = ["evnp <ep@e2.gg>"]
+edition = "2018"
+
+[dependencies]
+clap = "2.33.3"
+dirs = "3.0.2"
+ignore = "0.4.17"
+rand = "0.8.3"
+regex = "1.5.4"
+skim = "0.9.4"
