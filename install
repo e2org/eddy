@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+main() {
+  local name
+  local bin
+  cargo build
+  name="$( ( grep '^name =' | cut -d'"' -f2 ) < Cargo.toml )"
+  bin="$1"
+  if [[ -z "${bin}" ]]; then
+    bin="${HOME}/bin"
+  fi
+  echo "Linking ./target/debug/${name} -> ~/bin/${name}:"
+  echo "ln -s \"$( pwd )/target/debug/${name}\" \"${bin}/${name}\""
+  ln -s "$( pwd )/target/debug/${name}" "${bin}/${name}"
+  echo "Success!"
+}
+main "$@"
