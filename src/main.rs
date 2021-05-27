@@ -55,17 +55,19 @@ fn main() {
     let path = String::from(&args.path);
     let depth = args.depth; // Copy args so they may be moved into thread closure.
     thread::spawn(move || {
-        for result in WalkBuilder::new(path).max_depth(Some(depth)).build() {
-            if let Ok(entry) = result {
-                if entry.file_name() == OsStr::new("Cargo.toml") {
-                    if let Some(dir) = entry.path().parent() {
-                        // Send new item to skim:
-                        if tx
-                            .send(Arc::new(format!("{}", dir.display()).replace(&home, "~")))
-                            .is_err()
-                        {
-                            // Ignore possible error.
-                        }
+        for entry in WalkBuilder::new(path)
+            .max_depth(Some(depth))
+            .build()
+            .flatten()
+        {
+            if entry.file_name() == OsStr::new("Cargo.toml") {
+                if let Some(dir) = entry.path().parent() {
+                    // Send new item to skim:
+                    if tx
+                        .send(Arc::new(format!("{}", dir.display()).replace(&home, "~")))
+                        .is_err()
+                    {
+                        // Ignore possible error.
                     }
                 }
             }
