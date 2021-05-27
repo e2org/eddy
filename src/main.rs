@@ -2,13 +2,13 @@ extern crate clap;
 extern crate dirs;
 extern crate ignore;
 extern crate rand;
-extern crate regex;
 extern crate skim;
 
 use clap::clap_app;
 use ignore::WalkBuilder;
 use rand::seq::SliceRandom;
 use skim::prelude::{unbounded, Arc, Skim, SkimItemReceiver, SkimItemSender, SkimOptionsBuilder};
+use std::collections::HashSet;
 use std::env;
 use std::ffi::OsStr;
 use std::process::{self, Command, Stdio};
@@ -17,10 +17,11 @@ use std::thread;
 use eddy::Args;
 
 fn main() {
-    let home = match dirs::home_dir() {
-        Some(dir) => format!("{}", dir.display()),
-        None => String::from(""),
-    };
+    let home = dirs::home_dir()
+        .expect("Error: Could not determine $HOME directory.")
+        .into_os_string()
+        .into_string()
+        .expect("Error: Could not determine $HOME directory.");
 
     let args = Args::new(
         clap_app!(edit =>
@@ -28,10 +29,13 @@ fn main() {
             (author: env!("CARGO_PKG_AUTHORS"))
             (about: env!("CARGO_PKG_DESCRIPTION"))
             (@arg QUERY: default_value("") "query string used to search for projects")
-            (@arg PATH: -p --path default_value(&home) "location to search for projects in")
+            (@arg TARGET: -t --target +takes_value default_value("") "target file used to filter directories")
+            (@arg SUBDIR: -s --subdir +takes_value default_value("") "subdirectory to open files from")
+            (@arg FILES: -f --files +takes_value default_value("*") "files to open")
+            (@arg EDITOR: -e --editor +takes_value default_value("vim") "editor command used to open files")
+            (@arg PATH: -p --path +takes_value default_value(&home) "location to search for projects in")
             (@arg DEPTH: -d --depth +takes_value default_value("4") "max depth of directory search")
             (@arg verbose: -v --verbose "output info/debugging output to terminal")
-            (@arg quiet: -q --quiet "suppress all output -- run silently")
         )
         .get_matches(),
     )
@@ -51,23 +55,29 @@ fn main() {
     ];
     let colorscheme = colorschemes.choose(&mut rand::thread_rng()).unwrap();
 
+    let thread_target = String::from(&args.target);
+    let thread_path = String::from(&args.path);
+    let thread_depth = args.depth; // Copy args so they may be moved into thread closure.
+    let thread_home = String::from(&home);
+
     let (tx, rx): (SkimItemSender, SkimItemReceiver) = unbounded();
-    let path = String::from(&args.path);
-    let depth = args.depth; // Copy args so they may be moved into thread closure.
     thread::spawn(move || {
-        for entry in WalkBuilder::new(path)
-            .max_depth(Some(depth))
+        let mut items = HashSet::new();
+        for entry in WalkBuilder::new(thread_path)
+            .max_depth(Some(thread_depth))
             .build()
             .flatten()
         {
-            if entry.file_name() == OsStr::new("Cargo.toml") {
+            if thread_target.is_empty() || entry.file_name() == OsStr::new(thread_target.as_str()) {
                 if let Some(dir) = entry.path().parent() {
-                    // Send new item to skim:
-                    if tx
-                        .send(Arc::new(format!("{}", dir.display()).replace(&home, "~")))
-                        .is_err()
-                    {
-                        // Ignore possible error.
+                    let item = dir.to_str().unwrap_or("").replace(&thread_home, "~");
+                    // Avoid sending duplicate items to skim:
+                    if !items.contains(&item) {
+                        items.insert(String::from(&item));
+                        // Send new item to skim:
+                        if tx.send(Arc::new(item)).is_err() {
+                            // Ignore possible error.
+                        }
                     }
                 }
             }
@@ -104,18 +114,26 @@ fn main() {
         choice = String::from(item.output());
     }
 
-    // Run vim in selected project:
+    if env::set_current_dir(choice.replace("~", &home)).is_err() {
+        println!("{}: Directory does not exist.", choice);
+        process::exit(1);
+    };
+
+    if !args.subdir.is_empty() && env::set_current_dir(args.subdir).is_err() {
+        println!("{}: Directory does not exist.", choice);
+        process::exit(1);
+    };
+
+    // Run editor command on selected files in selected directory:
     Command::new("bash")
         .arg("-c")
-        .arg(format!(
-            "vim --not-a-term -O {0}/src/main.rs {0}/src/lib.rs -c redraw! < /dev/tty",
-            // --not-a-term : tell vim it's being invoked programmatically to avoid warnings
-            //           -O : open files in vertical split panes
-            //   -c redraw! : avoid vim's "Press ENTER or type command to continue" message
-            &choice
-        ))
+        .arg(format!("{} {} </dev/tty", args.editor, args.files))
+        // </dev/tty : necessary to restore control to terminal after exit
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .output()
         .expect("Error: Failed to execute vim.");
+
+    // Done!
+    process::exit(0);
 }
