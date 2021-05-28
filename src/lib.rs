@@ -40,9 +40,14 @@ impl Args {
         let subdir = value_t!(matches, "SUBDIR", String)?;
         let mut editor = value_t!(matches, "EDITOR", String)?;
         let path = value_t!(matches, "PATH", String)?;
-        let files = value_t!(matches, "FILES", String)?;
         let depth = value_t!(matches, "DEPTH", usize)?;
         let verbose = matches.is_present("verbose");
+
+        // Allow specifying multiple --file argments:
+        let files = match matches.values_of("FILES") {
+            Some(arr) => arr.collect::<Vec<&str>>().join(" "),
+            None => String::from(""),
+        };
 
         // Expand editor arg into full command:
         editor = match editor.as_str() {
