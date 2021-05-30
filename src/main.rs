@@ -1,12 +1,10 @@
 extern crate clap;
 extern crate dirs;
 extern crate ignore;
-extern crate rand;
 extern crate skim;
 
 use clap::clap_app;
 use ignore::WalkBuilder;
-use rand::seq::SliceRandom;
 use skim::prelude::{unbounded, Arc, Skim, SkimItemReceiver, SkimItemSender, SkimOptionsBuilder};
 use std::collections::HashSet;
 use std::env;
@@ -14,7 +12,7 @@ use std::ffi::OsStr;
 use std::process::{self, Command, Stdio};
 use std::thread;
 
-use eddy::Args;
+use eddy::{colorscheme, Args};
 
 fn main() {
     let home = dirs::home_dir()
@@ -42,6 +40,8 @@ fn main() {
              "location to search for projects in")
             (@arg DEPTH: -d --depth +takes_value default_value("4")
              "max depth of directory search")
+            (@arg COLOR: -c --color +takes_value default_value("")
+             "choose color scheme")
             (@arg verbose: -v --verbose
              "output info/debugging output to terminal")
         )
@@ -52,16 +52,6 @@ fn main() {
     if args.verbose {
         println!("{}", args);
     }
-
-    let colorschemes = vec![
-        // Colorscheme CMYK:
-        "bg+:-1,border:#0000ff,pointer:#0bc7e3,prompt:#feaf3c,info:#0000ff,fg:#0000ff,fg+:#0bc7e3,hl:#ff00ff,hl+:#ff00ff",
-        // Colorscheme Outrun:
-        "bg+:-1,border:#541388,pointer:#ef2b63,prompt:#0bc7e3,info:#541388,fg:#541388,fg+:#ef2b63,hl:#0bc7e3,hl+:#0bc7e3",
-        // Colorscheme Submariner:
-        "bg+:-1,border:#1d485f,pointer:#0bc7e3,prompt:#db662d,info:#1d485f,fg:#1d485f,fg+:#0bc7e3,hl:#db662d,hl+:#db662d",
-    ];
-    let colorscheme = colorschemes.choose(&mut rand::thread_rng()).unwrap();
 
     let thread_files = String::from(&args.files);
     let thread_target = String::from(&args.target);
@@ -116,7 +106,7 @@ fn main() {
     let result = Skim::run_with(
         &SkimOptionsBuilder::default()
             .query(Some(&args.query))
-            .color(Some(colorscheme))
+            .color(Some(colorscheme(&args)))
             .prompt(Some("$ "))
             .margin(Some("1,2"))
             .height(Some("40%"))

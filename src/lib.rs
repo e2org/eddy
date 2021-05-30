@@ -1,4 +1,7 @@
+extern crate rand;
+
 use clap::value_t;
+use rand::seq::SliceRandom;
 use std::error;
 use std::fmt;
 
@@ -13,6 +16,7 @@ pub struct Args {
     pub path: String,
     pub files: String,
     pub depth: usize,
+    pub color: String,
     pub verbose: bool,
 }
 
@@ -41,6 +45,7 @@ impl Args {
         let mut editor = value_t!(matches, "EDITOR", String)?;
         let path = value_t!(matches, "PATH", String)?;
         let depth = value_t!(matches, "DEPTH", usize)?;
+        let color = value_t!(matches, "COLOR", String)?;
         let verbose = matches.is_present("verbose");
 
         // Allow specifying multiple --file argments:
@@ -66,7 +71,31 @@ impl Args {
             path,
             files,
             depth,
+            color,
             verbose,
         })
+    }
+}
+
+pub fn colorscheme(args: &Args) -> &'static str {
+    let colorschemes = vec![
+        // Colorscheme CMYK:
+        "bg+:-1,border:#0000ff,pointer:#0bc7e3,prompt:#feaf3c,\
+            info:#0000ff,fg:#0000ff,fg+:#0bc7e3,hl:#ff00ff,hl+:#ff00ff",
+        // Colorscheme Outrun:
+        "bg+:-1,border:#541388,pointer:#ef2b63,prompt:#0bc7e3,\
+            info:#541388,fg:#541388,fg+:#ef2b63,hl:#0bc7e3,hl+:#0bc7e3",
+        // Colorscheme Submariner:
+        "bg+:-1,border:#1d485f,pointer:#0bc7e3,prompt:#db662d,\
+            info:#1d485f,fg:#1d485f,fg+:#0bc7e3,hl:#db662d,hl+:#db662d",
+    ];
+
+    // Return colorscheme matching provided --color arg:
+    match args.color.as_str() {
+        "cmyk" | "c" => colorschemes[0],
+        "outrun" | "o" => colorschemes[1],
+        "submariner" | "s" => colorschemes[2],
+        "random" | "r" => colorschemes.choose(&mut rand::thread_rng()).unwrap(),
+        _ => colorschemes[2], // default Submariner
     }
 }
