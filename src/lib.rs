@@ -16,6 +16,8 @@ pub struct Args {
     pub editor: String,
     pub color: String,
     pub depth: usize,
+    pub fullscreen: bool,
+    pub nopreview: bool,
     pub verbose: bool,
 }
 
@@ -23,7 +25,7 @@ impl fmt::Display for Args {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "ARGS: query={} source={} target={} paths={} editor={} color={} depth={} verbose={}",
+            "ARGS: query={} source={} target={} paths={} editor={} color={} depth={} fullscreen={} nopreview={} verbose={}",
             format!("\"{}\"", self.query),
             format!("\"{}\"", self.source),
             format!("\"{}\"", self.target),
@@ -31,6 +33,8 @@ impl fmt::Display for Args {
             format!("\"{}\"", self.editor),
             format!("\"{}\"", self.color),
             self.depth,
+            self.fullscreen,
+            self.nopreview,
             self.verbose,
         )
     }
@@ -44,6 +48,8 @@ impl Args {
         let mut editor = value_t!(matches, "EDITOR", String)?;
         let color = value_t!(matches, "COLOR", String)?;
         let depth = value_t!(matches, "DEPTH", usize)?;
+        let fullscreen = matches.is_present("fullscreen");
+        let nopreview = matches.is_present("nopreview");
         let verbose = matches.is_present("verbose");
 
         // Allow specifying multiple --paths argments:
@@ -69,6 +75,8 @@ impl Args {
             editor,
             color,
             depth,
+            fullscreen,
+            nopreview,
             verbose,
         })
     }

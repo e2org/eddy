@@ -40,6 +40,10 @@ fn main() {
              "choose color scheme")
             (@arg DEPTH: -d --depth +takes_value default_value("4")
              "max depth of directory search")
+            (@arg fullscreen: -f --fullscreen
+             "run selector ui in fullscreen mode")
+            (@arg nopreview: -n --nopreview
+             "do not show preview window for selections")
             (@arg verbose: -v --verbose
              "output info/debugging output to terminal")
         )
@@ -123,22 +127,38 @@ fn main() {
         drop(tx);
     });
 
+    let mut options = SkimOptionsBuilder::default();
+
+    options
+        .query(Some(&args.query))
+        .color(Some(colorscheme(&args)))
+        .prompt(Some("$ "))
+        .margin(Some("1,2"))
+        .height(Some("40%"))
+        .reverse(true)
+        .inline_info(true)
+        .select1(true);
+
+    if args.fullscreen {
+        options.height(Some("100%"));
+    }
+
+    if !args.nopreview {
+        options.preview(Some(
+            "
+            FILE={}
+            FILE=\"${FILE/#~/$HOME}\"
+            if ! command -v bat; then
+                cat $FILE
+            else
+                bat --color=always --style=plain $FILE
+            fi
+            ",
+        ));
+    }
+
     // Run skim to allow project selection:
-    let result = Skim::run_with(
-        &SkimOptionsBuilder::default()
-            .query(Some(&args.query))
-            .color(Some(colorscheme(&args)))
-            .prompt(Some("$ "))
-            .margin(Some("1,2"))
-            .height(Some("40%"))
-            .reverse(true)
-            .inline_info(true)
-            .select1(true)
-            .build()
-            .unwrap(),
-        Some(rx),
-    )
-    .unwrap();
+    let result = Skim::run_with(&options.build().unwrap(), Some(rx)).unwrap();
 
     // Allow ctrl+C to abort:
     if result.is_abort {
