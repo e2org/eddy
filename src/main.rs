@@ -6,7 +6,6 @@ extern crate skim;
 use clap::clap_app;
 use ignore::WalkBuilder;
 use skim::prelude::{unbounded, Arc, Skim, SkimItemReceiver, SkimItemSender, SkimOptionsBuilder};
-use std::collections::HashSet;
 use std::env;
 use std::ffi::OsStr;
 use std::process::{self, Command, Stdio};
@@ -15,33 +14,32 @@ use std::thread;
 use eddy::{colorscheme, Args};
 
 fn main() {
+    let home_err_msg = "Error: Could not determine $HOME directory.";
     let home = dirs::home_dir()
-        .expect("Error: Could not determine $HOME directory.")
+        .expect(home_err_msg)
         .into_os_string()
         .into_string()
-        .expect("Error: Could not determine $HOME directory.");
+        .expect(home_err_msg);
 
     let args = Args::new(
-        clap_app!(edit =>
+        clap_app!(eddy =>
             (version: env!("CARGO_PKG_VERSION"))
             (author: env!("CARGO_PKG_AUTHORS"))
             (about: env!("CARGO_PKG_DESCRIPTION"))
             (@arg QUERY: default_value("")
              "query string used to search for projects")
-            (@arg TARGET: -t --target +takes_value default_value("")
-             "target file used to filter directories")
-            (@arg SUBDIR: -s --subdir +takes_value default_value("")
-             "subdirectory to open files from")
-            (@arg FILES: -f --files +takes_value +multiple default_value("")
-             "files to open")
-            (@arg EDITOR: -e --editor +takes_value default_value("vim")
-             "editor command used to open files")
-            (@arg PATH: -p --path +takes_value default_value(&home)
+            (@arg SOURCE: -s --source +takes_value default_value(&home)
              "location to search for projects in")
-            (@arg DEPTH: -d --depth +takes_value default_value("4")
-             "max depth of directory search")
+            (@arg TARGET: -t --target +takes_value default_value("")
+             "file/directory to used to filter choices for fuzzy-searching")
+            (@arg PATHS: -p --paths +takes_value +multiple default_value("")
+             "specific files/directories to open")
+            (@arg EDITOR: -e --editor +takes_value default_value("")
+             "editor command used to open files/directories")
             (@arg COLOR: -c --color +takes_value default_value("")
              "choose color scheme")
+            (@arg DEPTH: -d --depth +takes_value default_value("4")
+             "max depth of directory search")
             (@arg verbose: -v --verbose
              "output info/debugging output to terminal")
         )
@@ -53,51 +51,74 @@ fn main() {
         println!("{}", args);
     }
 
-    let thread_files = String::from(&args.files);
+    let thread_paths = String::from(&args.paths);
+    let thread_source = String::from(&args.source);
     let thread_target = String::from(&args.target);
-    let thread_subdir = String::from(&args.subdir);
-    let thread_path = String::from(&args.path);
     let thread_depth = args.depth; // Copy args so they may be moved into thread closure.
     let thread_home = String::from(&home);
 
     let (tx, rx): (SkimItemSender, SkimItemReceiver) = unbounded();
     thread::spawn(move || {
-        let mut items = HashSet::new();
-        for entry in WalkBuilder::new(thread_path)
+        for entry in WalkBuilder::new(thread_source)
             .max_depth(Some(thread_depth))
             .build()
             .flatten()
         {
-            // TODO What should target + no files specified mean for behavior below? Currently
-            // target is no-op if no files are specified.
-            if thread_files.is_empty() {
+            if thread_target.is_empty() {
                 if let Some(file_type) = entry.file_type() {
-                    if file_type.is_file() {
+                    // Paths provided --> search directories
+                    // OR
+                    // No paths provided --> search files
+                    if (thread_paths.is_empty() && file_type.is_file())
+                        || (!thread_paths.is_empty() && !file_type.is_file())
+                    {
                         let item = entry.path().to_str().unwrap_or("");
-                        if thread_subdir.is_empty() || item.contains(&thread_subdir) {
-                            // Send new item to skim:
-                            if tx.send(Arc::new(item.replace(&thread_home, "~"))).is_err() {
-                                continue; // Ignore possible error.
-                            }
-                        }
-                    }
-                }
-            } else if thread_target.is_empty()
-                || entry.file_name() == OsStr::new(thread_target.as_str())
-            {
-                if let Some(path) = entry.path().parent() {
-                    let item = path.to_str().unwrap_or("");
-                    // Avoid sending duplicate items to skim:
-                    if !items.contains(item) {
-                        items.insert(String::from(item));
                         // Send new item to skim:
                         if tx.send(Arc::new(item.replace(&thread_home, "~"))).is_err() {
                             continue; // Ignore possible error.
                         }
                     }
+                } else {
+                    continue; // Ignore entry.
+                }
+            } else if entry.file_name() == OsStr::new(thread_target.as_str()) {
+                if let Some(file_type) = entry.file_type() {
+                    let mut path = entry.path();
+                    if file_type.is_file() {
+                        if let Some(parent_dir) = entry.path().parent() {
+                            path = parent_dir;
+                        } else {
+                            continue; // Ignore error retrieving parent directory.
+                        }
+                    }
+                    for target_entry in WalkBuilder::new(path)
+                        .max_depth(Some(thread_depth))
+                        .build()
+                        .flatten()
+                    {
+                        if let Some(file_type) = target_entry.file_type() {
+                            // Paths provided --> search directories
+                            // OR
+                            // No paths provided --> search files
+                            if (thread_paths.is_empty() && file_type.is_file())
+                                || (!thread_paths.is_empty() && !file_type.is_file())
+                            {
+                                let item = target_entry.path().to_str().unwrap_or("");
+                                // Send new item to skim:
+                                if tx.send(Arc::new(item.replace(&thread_home, "~"))).is_err() {
+                                    continue; // Ignore possible error.
+                                }
+                            }
+                        } else {
+                            continue; // Ignore entry.
+                        }
+                    }
+                } else {
+                    continue; // Ignore error retrieving file type.
                 }
             }
         }
+
         // Tell skim to stop waiting for items:
         drop(tx);
     });
@@ -130,32 +151,32 @@ fn main() {
         choice = String::from(item.output());
     }
 
-    let files;
-    if args.files.is_empty() {
+    let paths;
+    if args.paths.is_empty() {
         // If no files specified, open choice directly as file path:
-        files = choice;
+        paths = choice;
     } else {
-        files = args.files;
-        // If files specified, change dir so paths are relative to choice and subdir:
+        paths = args.paths;
+        // If files specified, change dir so paths are relative to choice:
         if env::set_current_dir(choice.replace("~", &home)).is_err() {
-            println!("{}: Directory does not exist.", choice);
-            process::exit(1);
-        };
-        if !args.subdir.is_empty() && env::set_current_dir(args.subdir).is_err() {
             println!("{}: Directory does not exist.", choice);
             process::exit(1);
         };
     }
 
-    // Run editor command on selected files in selected directory:
-    Command::new("bash")
-        .arg("-c")
-        .arg(format!("{} {} </dev/tty", args.editor, files))
-        // </dev/tty : necessary to restore control to terminal after exit
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .output()
-        .expect("Error: Failed to execute vim.");
+    if args.editor.is_empty() {
+        println!("{}", paths);
+    } else {
+        // Run editor command on selected files in selected directory:
+        Command::new("bash")
+            .arg("-c")
+            .arg(format!("{} {} </dev/tty", args.editor, paths))
+            // </dev/tty : necessary to restore control to terminal after exit
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .output()
+            .expect("Error: Failed to invoke selected editor.");
+    }
 
     // Done!
     process::exit(0);
