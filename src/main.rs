@@ -38,7 +38,7 @@ fn main() {
              "editor command used to open files/directories")
             (@arg COLOR: -c --color +takes_value default_value("")
              "choose color scheme")
-            (@arg DEPTH: -d --depth +takes_value default_value("4")
+            (@arg DEPTH: -d --depth +takes_value default_value("6")
              "max depth of directory search")
             (@arg fullscreen: -f --fullscreen
              "run selector ui in fullscreen mode")
@@ -148,10 +148,13 @@ fn main() {
             "
             FILE={}
             FILE=\"${FILE/#~/$HOME}\"
-            if ! command -v bat; then
-                cat $FILE
+            if command -v bat > /dev/null; then
+                bat --plain --color=always --theme=ansi --paging=never $FILE
+            elif command -v batcat > /dev/null; then
+                batcat --plain --color=always --theme=ansi --paging=never $FILE
+                # bat is sometimes installed as 'batcat'
             else
-                bat --color=always --style=plain $FILE
+                cat $FILE
             fi
             ",
         ));
@@ -173,11 +176,11 @@ fn main() {
 
     let paths;
     if args.paths.is_empty() {
-        // If no files specified, open choice directly as file path:
+        // If no paths specified, open choice directly as file path:
         paths = choice;
     } else {
         paths = args.paths;
-        // If files specified, change dir so paths are relative to choice:
+        // If paths specified, change dir so paths are relative to choice:
         if env::set_current_dir(choice.replace("~", &home)).is_err() {
             println!("{}: Directory does not exist.", choice);
             process::exit(1);
@@ -185,7 +188,8 @@ fn main() {
     }
 
     if args.editor.is_empty() {
-        println!("{}", paths);
+        // Expand tilde to full absolute path:
+        println!("{}", paths.replace("~", &home));
     } else {
         // Run editor command on selected files in selected directory:
         Command::new("bash")
